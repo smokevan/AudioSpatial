@@ -9,15 +9,24 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.interpolate import interp1d
 
+import sys
+import os
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
+
 from source_objects import pureTone
 from source_objects import noiseSource
 from source_objects import fileSource
+from source_objects import sweepSource
+
 from microphone_objects import omnidirectionalMic
 from microphone_objects import microphoneArray
+
 from processing_methods import estimate_doa_from_recordings
 from processing_methods import estimate_doa_using_aim
 
-### ======HELPER FUNCTION FOR TESTS ###
+
+### ======HELPER FUNCTIONS FOR TESTS ###
 
 def plot_recordings(recording, sample_rate=441000, title="Microphone Array Recordings"):
     """
@@ -372,9 +381,9 @@ def run_spacing_vs_frequency():
     spacings = np.arange(0.01, 0.21, 0.01)  # Spacings from 0.01 m to 0.20 m
     angle_range = np.arange(-180, 181, 10)  # Angle range in degrees
     results = np.zeros((len(frequencies), len(spacings)))
-    source1 = pureTone(distance=300, angle=-40, frequency=100, amplitude=10.0, elevation=0)
+    source1 = sweepSource(50, 0, f0 = 0, f1 = 100, amplitude = 10.0)
 
-    mic_array = microphoneArray(sample_rate, 0.070, geometry="tetra", mic_type="omni", noise=False, noiseAmplitude=0.001)
+    mic_array = microphoneArray(sample_rate, 0.070, geometry="tetra", mic_type="omni", noise=True, noiseAmplitude=0.0025)
 
     print("Running DOA simulation with varying microphone spacing and frequency...")
 
@@ -418,12 +427,14 @@ def run_spacing_vs_frequency():
         for spacing_idx, spacing in enumerate(spacings):
             mic_array.updateSpacing(spacing)
             angle_errors = []
-            
             for i, angle in enumerate(angle_range):
                 source1.updateAngle(angle)
-                source1.frequency = freq
+                source1.f0 = freq
+                source1.f1 = freq + 500
                 signals = [source1.generate_signal(windowing=None, duration=0.25, sample_rate=sample_rate)]
-                mic_array.record([source1], signals)
+                recordings = mic_array.record([source1], signals, recording_length=4)
+                # if freq_idx == 0 and spacing_idx == 0 and i == 0:
+                #     plot_recordings(recordings)
                 estimated_result = estimate_doa_from_recordings(mic_array)
                 estimated_angle = estimated_result['azimuth_deg']
                 
@@ -441,7 +452,7 @@ def run_spacing_vs_frequency():
 
     return results, frequencies, spacings
 
-def plot_2d_heatmap(results, frequencies, spacings):
+def plot_2d_heatmap(results, y_ax, x_ax):
     """
     Plot a 2D heatmap of the results showing percent error.
     
@@ -455,7 +466,7 @@ def plot_2d_heatmap(results, frequencies, spacings):
     
     # Create the heatmap
     im = plt.imshow(results, aspect='auto', cmap='viridis', origin='lower', 
-                   extent=[spacings[0], spacings[-1], frequencies[0], frequencies[-1]])
+                   extent=[x_ax[0], x_ax[-1], y_ax[0], y_ax[-1]])
     
     # Add colorbar
     cbar = plt.colorbar(im, label='Mean Percent Error (%)')
@@ -477,7 +488,7 @@ def plot_2d_heatmap(results, frequencies, spacings):
 
 # Test sample rates
 sample_rates = [44100, 192000]  # Sample rates in Hz
-sample_rate = 48000
+sample_rate = 44100
 colors = ['blue', 'red']  # Colors for different sample rates
 labels = ['44.1 kHz', '192 kHz']  # Labels for legend
 

@@ -6,7 +6,7 @@ class soundSource():
     A class to represent a sound source in a simulation.
     """
 
-    def __init__(self, distance, angle, elevation=0.0, amplitude = 0):
+    def __init__(self, distance = 100, angle = 0, elevation = 0, amplitude = 1.0):
         """
         initialize sound source with distance, angle, amplitude, freq, and elevation. 
         (effectively a point source described by spherical coordinates)
@@ -78,7 +78,7 @@ class noiseSource(soundSource):
 
     def __init__(self, distance = 0, angle = 0, elevation = 0, type = "gauss", amplitude=1.0):
         """
-        a pure tone sound source with parent SoundSource
+        a noise sound source with parent SoundSource
 
         :param frequency: Frequency of the pure tone in Hz
         :param amplitude: Amplitude of the pure tone (default is 1.0)
@@ -106,11 +106,26 @@ class noiseSource(soundSource):
             return noise
         
 class sweepSource(soundSource):
+
+    def __init__(self, distance = 100, angle = 0, f0 = 0, f1 = 100, elevation = 0, amplitude = 1.0):
+
+        super().__init__(distance=distance, angle=angle, elevation=elevation, amplitude=amplitude)
+
+        self.f0 = f0
+        self.f1 = f1
     
-    def __init__(self, distance = 0, angle = 0, freq_min = 0, freq_max = 100, amplitude = 1, elevation = 0):
-        super().__init__(self, distance, angle = angle, elevation = elevation, amplitude=amplitude)
-        self.freq_min = freq_min
-        self.freq_max = freq_max
+    def generate_signal(self, duration, sample_rate=44100, windowing = None):
+
+        t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+
+        k = (self.f1 / self.f0) ** (1 / duration)
+        signal = np.sin(2 * np.pi * self.f0 * (k**t - 1) / np.log(k))
+
+        if windowing is not None:
+            if windowing == "hann":
+                signal = signal * np.hanning(len(signal))
+        return signal
+
         
 class fileSource(soundSource):
     
