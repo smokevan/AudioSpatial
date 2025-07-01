@@ -43,8 +43,8 @@ plots/
 !docs/images/      # Keep documentation images
 
 # Jupyter
-.ipynb_checkpoints/
-*.ipynb
+# .ipynb_checkpoints/
+# *.ipynb
 
 # Temporary analysis files
 scratch/
