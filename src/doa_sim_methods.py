@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.interpolate import interp1d
 
@@ -207,10 +208,6 @@ def run_spacing_vs_frequency_sweep(sample_rate, frequencies, spacings, angle_ran
     at different frequencies. Returns percent error with proper angle wrapping.
     """
     
-    # Define frequencies and spacings
-    frequencies = np.arange(100, 20001, 500)  # Frequencies from 100 Hz to 20000 Hz
-    spacings = np.arange(0.01, 0.21, 0.01)  # Spacings from 0.01 m to 0.20 m
-    angle_range = np.arange(-180, 181, 18)  # Angle range in degrees
     results = np.zeros((len(frequencies), len(spacings)))
     source1 = sweepSource(50, 0, f0 = 0, f1 = 100, amplitude = 10.0)
 
@@ -307,8 +304,7 @@ def plot_2d_heatmap(results, y_ax, x_ax, vmin=0, vmax=180):
         cmap='viridis',  # Reverse colormap for "inverse" effect
         origin='lower',
         extent=[x_ax[0], x_ax[-1], y_ax[0], y_ax[-1]],
-        vmin=vmin,
-        vmax=vmax
+        norm=LogNorm(vmin=vmin, vmax=vmax)
     )
 
     # Add colorbar
