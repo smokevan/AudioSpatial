@@ -202,16 +202,16 @@ def plot_3d_setup(mic_array, sources, title="3D Audio Setup Visualization"):
     plt.tight_layout()
     plt.show()
 
-def run_spacing_vs_frequency_sweep(sample_rate, frequencies, spacings, angle_range):
+def run_spacing_vs_frequency_sweep(sample_rate, frequencies, spacings, angle_range, mic_geometry, noise, noise_amplitude):
     """
     Run a simulation to analyze the effect of microphone spacing on DOA estimation accuracy
     at different frequencies. Returns percent error with proper angle wrapping.
     """
     
     results = np.zeros((len(frequencies), len(spacings)))
-    source1 = sweepSource(50, 0, f0 = 0, f1 = 100, amplitude = 10.0)
+    source1 = sweepSource(10, 0, f0 = 0, f1 = 100, amplitude = 10.0)
 
-    mic_array = microphoneArray(sample_rate, 0.070, geometry="planar", mic_type="omni", noise=True, noiseAmplitude=0.005)
+    mic_array = microphoneArray(sample_rate, 0.070, geometry=mic_geometry, mic_type="omni", noise=noise, noiseAmplitude=noise_amplitude)
 
     print("Running DOA simulation with varying microphone spacing and frequency...")
 
@@ -255,14 +255,15 @@ def run_spacing_vs_frequency_sweep(sample_rate, frequencies, spacings, angle_ran
         for spacing_idx, spacing in enumerate(spacings):
             mic_array.updateSpacing(spacing)
             angle_errors = []
+            angle_range = np.random.uniform(-180, 180, size=5)
             for i, angle in enumerate(angle_range):
                 source1.updateAngle(angle)
                 source1.f0 = freq
                 source1.f1 = freq + 500
-                signals = [source1.generate_signal(windowing=None, duration=0.25, sample_rate=sample_rate)]
-                recordings = mic_array.record([source1], signals, recording_length=1)
+                signals = [source1.generate_signal(windowing=None, duration=0.10, sample_rate=sample_rate)]
+                recordings = mic_array.record([source1], signals, recording_length=0.5)
                 # if freq_idx == 0 and spacing_idx == 0 and i == 0:
-                #     plot_recordings(recordings)
+                #      plot_recordings(recordings)
                 estimated_result = estimate_doa_from_recordings(mic_array)
                 estimated_angle = estimated_result['azimuth_deg']
                 
@@ -304,9 +305,9 @@ def plot_2d_heatmap(results, y_ax, x_ax, vmin=0, vmax=180):
         cmap='viridis',  # Reverse colormap for "inverse" effect
         origin='lower',
         extent=[x_ax[0], x_ax[-1], y_ax[0], y_ax[-1]],
-        norm=LogNorm(vmin=vmin, vmax=vmax)
+        vmax = vmax,
+        vmin = vmin
     )
-
     # Add colorbar
     cbar = plt.colorbar(im, label='RMS Angle Error')
 

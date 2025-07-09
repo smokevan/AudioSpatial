@@ -3,47 +3,76 @@ from scipy import signal as scipysig
 from scipy import stats
 import math
 import matplotlib.pyplot as plt
+import torch
 
 import numpy as np
 from scipy.optimize import least_squares
 from numpy.fft import fft, ifft
 from scipy.signal import correlate
 
+def get_optimal_device():
+    """Get the best available device for PyTorch operations."""
+    if torch.backends.mps.is_available():
+        return torch.device("mps")  # Apple Silicon GPU
+    elif torch.cuda.is_available():
+        return torch.device("cuda")  # NVIDIA GPU
+    else:
+        return torch.device("cpu")
 
-def cross_correlation(sig1, sig2):
-    """Compute cross-correlation between two signals using PHAT weighting.
+def cross_correlation(sig1, sig2, use_pytorch=True):
+    """Compute cross-correlation between two signals using PyTorch FFT for Apple Silicon GPU acceleration.
     
     Args:
         sig1: First signal array
         sig2: Second signal array
+        use_pytorch: Whether to use PyTorch FFT (default: True)
         
     Returns:
         cc: Cross-correlation array
         lags: Corresponding lag values
     """
-    # n = sig1.shape[0] + sig2.shape[0]
-    # SIG1 = np.fft.rfft(sig1, n=n)
-    # SIG2 = np.fft.rfft(sig2, n=n)
-    
-    # R = SIG1 * np.conj(SIG2)
-    # R /= np.abs(R) + 1e-15  # PHAT weighting: keep phase, normalize magnitude
-
-    # cc = np.fft.irfft(R, n=n)
-    # max_shift = int(n / 2)
-    # cc = np.concatenate((cc[-max_shift:], cc[:max_shift+1]))  # wrap negative lags
-
-    # lags = np.arange(-max_shift, max_shift + 1)
-
-    n = sig1.shape[0] + sig2.shape[0]
-    SIG1 = np.fft.rfft(sig1, n=n)
-    SIG2 = np.fft.rfft(sig2, n=n)
-    
-    R = SIG1 * np.conj(SIG2)
-    cc = np.fft.irfft(R, n=n)
-    
-    max_shift = int(n / 2)
-    cc = np.concatenate((cc[-max_shift:], cc[:max_shift+1]))
-    lags = np.arange(-max_shift, max_shift + 1)
+    if use_pytorch:
+        device = get_optimal_device()
+        
+        # Convert to PyTorch tensors if needed
+        if isinstance(sig1, np.ndarray):
+            sig1_torch = torch.from_numpy(sig1).float().to(device)
+        else:
+            sig1_torch = sig1.float().to(device)
+            
+        if isinstance(sig2, np.ndarray):
+            sig2_torch = torch.from_numpy(sig2).float().to(device)
+        else:
+            sig2_torch = sig2.float().to(device)
+        
+        n = sig1_torch.shape[0] + sig2_torch.shape[0]
+        
+        # PyTorch FFT operations
+        SIG1 = torch.fft.rfft(sig1_torch, n=n)
+        SIG2 = torch.fft.rfft(sig2_torch, n=n)
+        
+        R = SIG1 * torch.conj(SIG2)
+        cc = torch.fft.irfft(R, n=n)
+        
+        max_shift = int(n / 2)
+        cc = torch.cat([cc[-max_shift:], cc[:max_shift+1]])
+        
+        # Convert back to numpy
+        cc = cc.cpu().numpy()
+        lags = np.arange(-max_shift, max_shift + 1)
+        
+    else:
+        # Original NumPy implementation
+        n = sig1.shape[0] + sig2.shape[0]
+        SIG1 = np.fft.rfft(sig1, n=n)
+        SIG2 = np.fft.rfft(sig2, n=n)
+        
+        R = SIG1 * np.conj(SIG2)
+        cc = np.fft.irfft(R, n=n)
+        
+        max_shift = int(n / 2)
+        cc = np.concatenate((cc[-max_shift:], cc[:max_shift+1]))
+        lags = np.arange(-max_shift, max_shift + 1)
     
     return cc, lags
 
@@ -165,30 +194,39 @@ def estimate_doa_from_recordings(mic_array, sound_speed=343.0):
     
     # Step 3: Define objective function for 3D optimization
     def residuals_3d(params):
-        """Compute residuals between measured and predicted TDOAs for 3D case."""
-        errors = []
+        """Compute residuals using PyTorch for vectorized operations."""
+        device = get_optimal_device()
         
         azimuth = float(params[0])
         elevation = float(params[1])
         
         # 3D source direction vector
-        source_dir = np.array([
+        source_dir = torch.tensor([
             np.cos(azimuth) * np.cos(elevation),
             np.sin(azimuth) * np.cos(elevation),
             np.sin(elevation)
+        ], device=device, dtype=torch.float32)
+        
+        # Vectorize all TDOA calculations
+        tdoa_measured = torch.tensor([data['tdoa'] for data in valid_tdoas], device=device, dtype=torch.float32)
+        
+        # Stack all microphone vectors
+        mic_vectors = torch.stack([
+            torch.tensor(data['mic_2_pos'] - data['mic_1_pos'], device=device, dtype=torch.float32) 
+            for data in valid_tdoas
         ])
         
-        for data in valid_tdoas:
-            tdoa_measured = data['tdoa']
-            mic_vector = data['mic_2_pos'] - data['mic_1_pos']
-            tdoa_predicted = np.dot(source_dir, mic_vector) / sound_speed
-            
-            # Weight by quality
-            weight = np.sqrt(data['quality'] / max(qualities))
-            error = weight * (tdoa_measured - tdoa_predicted)
-            errors.append(error)
+        # Vectorized dot product for all pairs at once
+        tdoa_predicted = torch.matmul(mic_vectors, source_dir) / sound_speed
         
-        return np.array(errors)
+        # Vectorized weight calculation
+        qualities_tensor = torch.tensor([data['quality'] for data in valid_tdoas], device=device, dtype=torch.float32)
+        weights = torch.sqrt(qualities_tensor / torch.max(qualities_tensor))
+        
+        # Vectorized error calculation
+        errors = weights * (tdoa_measured - tdoa_predicted)
+        
+        return errors.cpu().numpy()  # Convert back for least_squares
     
     # Step 4: Define 2D objective function for azimuth initialization
     def residuals_2d(params):
@@ -211,36 +249,92 @@ def estimate_doa_from_recordings(mic_array, sound_speed=343.0):
         return np.array(errors)
     
     # Step 5: Grid search for azimuth initialization
-    test_angles = np.linspace(-np.pi, np.pi, 36)
-    best_azimuth = None
-    best_cost = np.inf
+    # Step 5: Grid search for azimuth initialization (PyTorch vectorized)
+    device = get_optimal_device()
+    test_angles = torch.linspace(-np.pi, np.pi, 36, device=device, dtype=torch.float32)
+
+    # Pre-compute all data as tensors for vectorized operations
+    tdoa_measured = torch.tensor([data['tdoa'] for data in valid_tdoas], device=device, dtype=torch.float32)
+    mic_vectors = torch.stack([
+        torch.tensor(data['mic_2_pos'] - data['mic_1_pos'], device=device, dtype=torch.float32) 
+        for data in valid_tdoas
+    ])
+    qualities_tensor = torch.tensor([data['quality'] for data in valid_tdoas], device=device, dtype=torch.float32)
+    max_quality = torch.max(qualities_tensor)
+    weights = torch.sqrt(qualities_tensor / max_quality)
+
+    # Vectorized cost calculation for all angles at once
+    def vectorized_grid_search(angles, tdoa_measured, mic_vectors, weights, sound_speed):
+        """Compute costs for all angles simultaneously."""
+        num_angles = len(angles)
+        costs = torch.zeros(num_angles, device=angles.device, dtype=torch.float32)
+        
+        for i, angle in enumerate(angles):
+            # 2D source direction vector for this angle
+            source_dir = torch.tensor([torch.cos(angle), torch.sin(angle), 0.0], device=angles.device, dtype=torch.float32)
+            
+            # Vectorized TDOA prediction for all microphone pairs
+            tdoa_predicted = torch.matmul(mic_vectors, source_dir) / sound_speed
+            
+            # Vectorized error calculation
+            errors = weights * (tdoa_measured - tdoa_predicted)
+            costs[i] = torch.sum(errors**2, dtype=torch.float32)
+        
+        return costs
+
+    # Compute all costs at once
+    costs = vectorized_grid_search(test_angles, tdoa_measured, mic_vectors, weights, sound_speed)
+
+    # Find the best angle
+    best_idx = torch.argmin(costs)
+    best_azimuth = test_angles[best_idx].item()
+    best_cost = costs[best_idx].item()
     
-    for test_angle in test_angles:
-        cost = np.sum(residuals_2d([test_angle])**2)
-        if cost < best_cost:
-            best_cost = cost
-            best_azimuth = test_angle
-    
+    # Step 6: Try multiple elevation starting points with best azimuth
     # Step 6: Try multiple elevation starting points with best azimuth
     elevation_candidates = [0, np.pi/6, -np.pi/6, np.pi/3, -np.pi/3]  # 0°, ±30°, ±60°
     best_initial_guess = None
     best_3d_cost = np.inf
-    
+
+    # Ensure azimuth is within bounds first
+    best_azimuth = np.clip(best_azimuth, -np.pi + 1e-6, np.pi - 1e-6)
+
     for test_elevation in elevation_candidates:
-        initial_guess = [best_azimuth, test_elevation]
-        cost = np.sum(residuals_3d(initial_guess)**2)
-        if cost < best_3d_cost:
-            best_3d_cost = cost
-            best_initial_guess = initial_guess
-    
+        # Clamp elevation to valid range
+        clamped_elevation = np.clip(test_elevation, -np.pi/2 + 1e-6, np.pi/2 - 1e-6)
+        
+        initial_guess = [best_azimuth, clamped_elevation]
+        
+        try:
+            cost = np.sum(residuals_3d(initial_guess)**2)
+            if cost < best_3d_cost:
+                best_3d_cost = cost
+                best_initial_guess = initial_guess
+        except Exception as e:
+            print(f"Warning: Failed to evaluate initial guess {initial_guess}: {e}")
+            continue
+
+    # Fallback if no valid initial guess found
+    if best_initial_guess is None:
+        print("Warning: No valid initial guess found, using fallback [0, 0]")
+        best_initial_guess = [0.0, 0.0]
+
+    # Final safety check - ensure initial guess is strictly within bounds
+    best_initial_guess[0] = np.clip(best_initial_guess[0], -np.pi + 1e-6, np.pi - 1e-6)
+    best_initial_guess[1] = np.clip(best_initial_guess[1], -np.pi/2 + 1e-6, np.pi/2 - 1e-6)
+
+    # Debug output (remove after testing)
+    # print(f"Final initial guess: {best_initial_guess}")
+    # print(f"Azimuth in bounds: {-np.pi < best_initial_guess[0] < np.pi}")
+    # print(f"Elevation in bounds: {-np.pi/2 < best_initial_guess[1] < np.pi/2}")
+
     # Step 7: Run 3D optimization
     result = least_squares(
         residuals_3d, 
         best_initial_guess,
-        bounds=([-np.pi, -np.pi/2], [np.pi, np.pi/2]),
+        bounds=([-np.pi + 1e-6, -np.pi/2 + 1e-6], [np.pi - 1e-6, np.pi/2 - 1e-6]),
         method='trf'
     )
-    
     # Convert to degrees
     azimuth_deg = np.degrees(result.x[0])
     elevation_deg = np.degrees(result.x[1])
