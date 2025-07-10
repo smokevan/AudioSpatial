@@ -322,3 +322,82 @@ def plot_2d_heatmap(results, y_ax, x_ax, vmin=0, vmax=180):
     # Format the plot
     plt.tight_layout()
     plt.show()
+
+def run_spacing_vs_frequency_sweep_aim(sample_rate, frequencies, spacings, angle_range, noise, noise_amplitude):
+    """
+    Run a simulation to analyze the effect of microphone spacing on DOA estimation accuracy
+    at different frequencies. Returns percent error with proper angle wrapping.
+    """
+    
+    results = np.zeros((len(frequencies), len(spacings)))
+    source1 = sweepSource(10, 0, f0 = 0, f1 = 100, amplitude = 10.0)
+
+    mic_array = microphoneArray(sample_rate, 0.070, geometry="tetra", mic_type="directional", noise=noise, noiseAmplitude=noise_amplitude)
+
+    print("Running DOA simulation with varying microphone spacing and frequency...")
+
+    def angle_difference(estimated, actual):
+        """
+        Calculate the smallest angle difference between two angles, handling wrapping.
+        
+        Args:
+            estimated: Estimated angle in degrees
+            actual: Actual angle in degrees
+            
+        Returns:
+            Smallest angular difference in degrees (always positive)
+        """
+        # Calculate raw difference
+        diff = estimated - actual
+        
+        # Wrap to [-180, 180] range
+        diff = ((diff + 180) % 360) - 180
+        
+        # Return absolute value for error calculation
+        return abs(diff)
+
+    def calculate_percent_error(estimated, actual, max_error=180):
+        """
+        Calculate percent error for angle estimation.
+        
+        Args:
+            estimated: Estimated angle in degrees
+            actual: Actual angle in degrees
+            max_error: Maximum possible error (180° for angles)
+            
+        Returns:
+            Percent error
+        """
+        absolute_error = angle_difference(estimated, actual)
+        percent_error = (absolute_error / max_error) * 100
+        return percent_error
+
+    for freq_idx, freq in enumerate(frequencies):
+        for spacing_idx, spacing in enumerate(spacings):
+            mic_array.updateSpacing(spacing)
+            angle_errors = []
+            angle_range = np.random.uniform(-180, 180, size=10)
+            for i, angle in enumerate(angle_range):
+                source1.updateAngle(angle)
+                source1.f0 = freq
+                source1.f1 = freq + 500
+                signals = [source1.generate_signal(windowing=None, duration=0.10, sample_rate=sample_rate)]
+                recordings = mic_array.record([source1], signals, recording_length=0.5)
+                # if freq_idx == 0 and spacing_idx == 0 and i == 0:
+                #      plot_recordings(recordings)
+                estimated_result = estimate_doa_using_aim(mic_array)
+                estimated_angle = estimated_result['azimuth_deg']
+                
+                # Calculate percent error with proper angle wrapping
+                percent_error = calculate_percent_error(estimated_angle, angle)
+                angle_errors.append(np.square(angle_difference(estimated_angle, angle)))
+
+            # Store the mean percent error for this frequency and spacing
+            results[freq_idx, spacing_idx] = np.sqrt(np.mean(angle_errors))
+            
+        # Progress indicator
+        print(f"Completed frequency {freq} Hz ({freq_idx + 1}/{len(frequencies)})")
+
+    print("DOA simulation completed.")
+
+    return results, frequencies, spacings

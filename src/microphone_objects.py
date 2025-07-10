@@ -118,7 +118,7 @@ class directionalMic(micCapsule):
         :param signals: List of numpy arrays containing the signals to be recorded
 
         """
-        num_samples = recording_length * self.sample_rate
+        num_samples = int(recording_length * self.sample_rate)
 
         self.recording = np.zeros(num_samples)  # Initialize recording buffer
         

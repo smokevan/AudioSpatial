@@ -403,8 +403,7 @@ def estimate_doa_using_aim(mic_array, sound_speed=343.0, angle_offset_deg=0.0):
 
     # weight the azimuth values by the intensity
     weights = np.abs(w)**2
-    # Convert recordings to B-format
-
+    
     # need to set these parameters for histogram
     duration = len(recordings_b[0])/sample_rate
     time_step = 0.05
@@ -418,20 +417,38 @@ def estimate_doa_using_aim(mic_array, sound_speed=343.0, angle_offset_deg=0.0):
     azimuth_deg = np.degrees(azimuth_flat)
     azimuth_deg = (azimuth_deg + 180) % 360 - 180
 
-    # Create histogram bins
-    num_azim = 60
-    bins = np.linspace(-180, 180, num_azim + 1)
-
-    # Weighted histogram
-    hist, bin_edges = np.histogram(azimuth_deg, bins=bins, weights=weights_flat)
-
-    # Find the bin with the maximum weighted count
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-    plt.figure(figsize=(10, 5))
-    plt.bar(bin_centers, hist, width=bin_edges[1] - bin_edges[0], align='center', alpha=0.7, color='royalblue')
-    plt.xlabel('Azimuth (degrees)')
-    plt.ylabel('Weighted Count')
-    plt.title('Azimuthal Histogram (AIM Method)')
-    plt.grid(True, alpha=0.3)
-    plt.xlim([-180, 180])
-    plt.show()
+    # Calculate weighted circular mean
+    # Convert angles to radians for circular averaging
+    azimuth_rad = np.radians(azimuth_deg)
+    
+    # Convert to unit vectors on the unit circle
+    cos_angles = np.cos(azimuth_rad)
+    sin_angles = np.sin(azimuth_rad)
+    
+    # Calculate weighted mean of the unit vectors
+    weighted_cos_sum = np.sum(weights_flat * cos_angles)
+    weighted_sin_sum = np.sum(weights_flat * sin_angles)
+    total_weight = np.sum(weights_flat)
+    
+    # Avoid division by zero
+    if total_weight == 0:
+        raise ValueError("Total weight is zero - unable to compute circular mean")
+    
+    mean_cos = weighted_cos_sum / total_weight
+    mean_sin = weighted_sin_sum / total_weight
+    
+    # Calculate the circular mean angle
+    circular_mean_rad = np.arctan2(mean_sin, mean_cos)
+    circular_mean_deg = np.degrees(circular_mean_rad)
+    
+    # Apply angle offset
+    final_azimuth = circular_mean_deg + angle_offset_deg
+    
+    # Wrap the final result to [-180, 180] range
+    final_azimuth = (final_azimuth + 180) % 360 - 180
+    
+    # Return dictionary with azimuth (elevation would need additional processing)
+    return {
+        'azimuth_deg': final_azimuth,
+        'elevation_deg': 0.0  # Placeholder - original code doesn't compute elevation
+    }
