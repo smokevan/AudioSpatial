@@ -385,13 +385,13 @@ def estimate_doa_using_aim(mic_array, sound_speed=343.0, angle_offset_deg=0.0):
     recordings = np.array(recordings)
     recordings_b, sample_rate = convert_to_b_format(recordings, mic_array.microphones[0].sample_rate)
 
+
     # make b-format spectrogram
     specs = []
     for num in np.arange(4):
-        freqs, inds, spec = scipysig.stft(recordings_b[num,:], fs=sample_rate, nperseg=1024)
+        freqs, inds, spec = scipysig.stft(recordings_b[num,:], fs=sample_rate, nperseg=(int(0.02*sample_rate)))
         nf_full = len(freqs)
-        freqs = freqs[0:160]
-        specs.append(spec[0:160, :].T)
+        specs.append(spec.T)
 
     # directly get the three components
     w = specs[0]

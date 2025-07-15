@@ -376,7 +376,6 @@ def run_spacing_vs_frequency_sweep_aim(sample_rate, frequencies, spacings, angle
         for spacing_idx, spacing in enumerate(spacings):
             mic_array.updateSpacing(spacing)
             angle_errors = []
-            angle_range = np.random.uniform(-180, 180, size=10)
             for i, angle in enumerate(angle_range):
                 source1.updateAngle(angle)
                 source1.f0 = freq
